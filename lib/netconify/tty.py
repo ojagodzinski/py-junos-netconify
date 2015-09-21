@@ -34,6 +34,7 @@ class Terminal(object):
   _ST_DONE = 4
   _ST_BAD_PASSWD = 5
   _ST_TTY_NOLOGIN = 6
+  _ST_CTRLZ = 7
 
   _re_pat_login = '(?P<login>ogin:\s*$)'
 
@@ -43,7 +44,8 @@ class Terminal(object):
     '(?P<passwd>assword:\s*$)',
     '(?P<badpasswd>ogin incorrect)',
     '(?P<shell>%\s*$)',
-    '(?P<cli>[^\\-"]>\s*$)'
+    '(?P<cli>[^\\-"]>\s*$)',
+    '(?P<ctrlz><CTRL>Z)'
   ]
 
   # -----------------------------------------------------------------------
@@ -127,9 +129,15 @@ class Terminal(object):
       raise RuntimeError('logout_sm_failure')
 
     prompt,found = self.read_prompt()
+    self.notify('\n\nlogin', "CUR-STATE:{0}".format(self.state))
+    self.notify('login', "IN:{0}:`{1}`".format(found, prompt))
+    self.notify('password', "{0}".format(self.passwd))
+    self.notify('try', "{0}".format(attempt))
 
     def _ev_login():
       # back at login prompt, so we are cleanly done!
+      self.write('\015')
+      self.write('exit')
       self._tty_close()
 
     def _ev_shell():
@@ -162,11 +170,10 @@ class Terminal(object):
 
     prompt,found = self.read_prompt()
 
-#   UNCOMMENT TO SEE progress
-#     self.notify('\n\nlogin', "CUR-STATE:{0}".format(self.state))
-#     self.notify('login', "IN:{0}:`{1}`".format(found, prompt))
-#     self.notify('password', "{0}".format(self.passwd))
-#     self.notify('try', "{0}".format(attempt))
+    self.notify('\n\nlogin', "CUR-STATE:{0}".format(self.state))
+    self.notify('login', "IN:{0}:`{1}`".format(found, prompt))
+    self.notify('password', "{0}".format(self.passwd))
+    self.notify('try', "{0}".format(attempt))
 
     def _ev_loader():
       self.state = self._ST_LOADER
@@ -208,6 +215,11 @@ class Terminal(object):
         sleep(5)
         self.write('\n')
 
+    def _ev_ctrlz():
+      self.state = self._ST_CTRLZ
+      sleep(1)
+      self.write('\015')
+
     def _ev_shell():
       if self.state == self._ST_INIT:
          # this means that the shell was left
@@ -236,7 +248,8 @@ class Terminal(object):
       'passwd': _ev_passwd,
       'badpasswd': _ev_bad_passwd,
       'shell': _ev_shell,
-      'cli': _ev_cli
+      'cli': _ev_cli,
+      'ctrlz': _ev_ctrlz
     }
 
     _ev_tbl.get(found, _ev_tty_nologin)()

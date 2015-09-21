@@ -306,7 +306,7 @@ class netconifyCmdo(object):
             self.console = ('telnet', host, port)
             self._tty = netconify.Telnet(**tty_args)
         elif self._args.ssh is not None:
-            host, port, s_user, s_passwd = re.split('[,:]', self._args.ssh)
+            host, port, s_user, s_passwd = re.split('[,]', self._args.ssh)
             tty_args['host'] = host
             tty_args['port'] = port
             tty_args['s_user'] = s_user or self._args.user
