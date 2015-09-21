@@ -3,12 +3,15 @@ This file defines the 'netconifyCmdo' class.
 Used by the 'netconify' shell utility.
 """
 import os
+import sys
 import json
 import re
 import argparse
+import jinja2
+import traceback
+from ConfigParser import SafeConfigParser
 from getpass import getpass
 from lxml import etree
-import traceback
 
 import netconify
 import netconify.constants as C
@@ -19,7 +22,6 @@ __all__ = ['netconifyCmdo']
 QFX_MODEL_LIST = ['QFX3500', 'QFX3600', 'VIRTUAL CHASSIS']
 QFX_MODE_NODE = 'NODE'
 QFX_MODE_SWITCH = 'SWITCH'
-
 
 class netconifyCmdo(object):
 
@@ -60,122 +62,125 @@ class netconifyCmdo(object):
         p = argparse.ArgumentParser(add_help=True)
         self._argsparser = p
 
-        # ---------------------------------------------------------------------
+        # ------------------------------------------------------------------------
         # input identifiers
-        # ---------------------------------------------------------------------
+        # ------------------------------------------------------------------------
 
         p.add_argument('name',
-                       nargs='?',
-                       help='name of Junos device')
+                        nargs='?',
+                        help='name of Junos device')
 
-        p.add_argument('--version', action='version', version=C.version)
+        p.add_argument('--version', action='version', version=C.version )
 
-        # ---------------------------------------------------------------------
+        # ------------------------------------------------------------------------
         # Device level options
-        # ---------------------------------------------------------------------
+        # ------------------------------------------------------------------------
 
         g = p.add_argument_group('DEVICE options')
 
         g.add_argument('-f', '--file',
-                       dest='junos_conf_file',
-                       help="Junos configuration file")
+            dest='junos_conf_file',
+            help="Junos configuration file")
 
         g.add_argument("--merge",
-                       dest='junos_merge_conf',
-                       help='load-merge conf file, default is overwrite',
-                       action='store_true')
+            dest='junos_merge_conf',
+            help='load-merge conf file, default is overwrite',
+            action='store_true')
 
         g.add_argument('--qfx-node',
-                       dest='qfx_mode',
-                       action='store_const', const=QFX_MODE_NODE,
-                       help='Set QFX device into "node" mode')
+            dest='qfx_mode',
+            action='store_const', const=QFX_MODE_NODE,
+            help='Set QFX device into "node" mode')
 
         g.add_argument('--qfx-switch',
-                       dest='qfx_mode',
-                       action='store_const', const=QFX_MODE_SWITCH,
-                       help='Set QFX device into "switch" mode')
+            dest='qfx_mode',
+            action='store_const', const=QFX_MODE_SWITCH,
+            help='Set QFX device into "switch" mode')
 
         g.add_argument('--zeroize',
-                       dest='request_zeroize',
-                       action='store_true',
-                       help='ZEROIZE the device')
+            dest='request_zeroize',
+            action='store_true',
+            help='ZEROIZE the device')
 
         g.add_argument('--shutdown',
-                       dest='request_shutdown',
-                       choices=['poweroff', 'reboot'],
-                       help='SHUTDOWN or REBOOT the device')
+            dest='request_shutdown',
+            choices=['poweroff','reboot'],
+            help='SHUTDOWN or REBOOT the device')
 
         g.add_argument('--facts',
-                       action='store_true',
-                       dest='gather_facts',
-                       help='Gather facts and save them into SAVEDIR')
+            action='store_true',
+            dest='gather_facts',
+            help='Gather facts and save them into SAVEDIR')
 
         g.add_argument('--srx_cluster',
-                       dest='request_srx_cluster',
-                       help='cluster_id,node ... Invoke cluster on SRX device and reboot')
+            dest='request_srx_cluster',
+            help='cluster_id,node ... Invoke cluster on SRX device and reboot')
 
         g.add_argument('--srx_cluster_disable',
-                       dest='request_srx_cluster_dis',
-                       action='store_true',
-                       help='Disable cluster mode on SRX device and reboot')
+            dest='request_srx_cluster_dis',
+            action='store_true',
+            help='Disable cluster mode on SRX device and reboot')
 
-        # ---------------------------------------------------------------------
+        # ------------------------------------------------------------------------
         # directories
-        # ---------------------------------------------------------------------
+        # ------------------------------------------------------------------------
 
         g = p.add_argument_group('DIRECTORY options')
 
-        g.add_argument('-S', '--savedir',
-                       nargs='?', default='.',
-                       help="Files are saved into this directory, $CWD by default")
+        g.add_argument('-S','--savedir',
+            nargs='?', default='.',
+            help="Files are saved into this directory, $CWD by default")
 
         g.add_argument('--no-save',
-                       action='store_true',
-                       help="Do not save facts and inventory files")
+            action='store_true',
+            help="Do not save facts and inventory files")
 
-        # ---------------------------------------------------------------------
+        # ------------------------------------------------------------------------
         # console port
-        # ---------------------------------------------------------------------
+        # ------------------------------------------------------------------------
 
         g = p.add_argument_group('CONSOLE options')
 
-        g.add_argument('-p', '--port',
-                       default='/dev/ttyUSB0',
-                       help="serial port device")
+        g.add_argument('-p','--port',
+            default='/dev/ttyUSB0',
+            help="serial port device")
 
-        g.add_argument('-b', '--baud',
-                       default='9600',
-                       help="serial port baud rate")
+        g.add_argument('-b','--baud',
+            default='9600',
+            help="serial port baud rate")
 
         g.add_argument('-t', '--telnet',
-                       help='terminal server, <host>,<port>')
+            help='terminal server, <host>,<port>')
+
+        g.add_argument('-s', '--ssh',
+            help='ssh server, <host>,<port>,<user>,<password>')
 
         g.add_argument('--timeout',
-                       default='0.5',
-                       help='TTY connection timeout (s)')
+            default='0.5',
+            help='TTY connection timeout (s)')
 
-        # ---------------------------------------------------------------------
+        # ------------------------------------------------------------------------
         # login configuration
-        # ---------------------------------------------------------------------
+        # ------------------------------------------------------------------------
 
         g = p.add_argument_group("LOGIN options")
 
-        g.add_argument('-u', '--user',
-                       default='root',
-                       help='login user name, defaults to "root"')
+        g.add_argument('-u','--user',
+            default='root',
+            help='login user name, defaults to "root"')
 
-        g.add_argument('-P', '--passwd',
-                       default='',
-                       help='login user password, *empty* for NOOB')
+        g.add_argument('-P','--passwd',
+            default='',
+            help='login user password, *empty* for NOOB')
 
         g.add_argument('-k',
-                       action='store_true', default=False,
-                       dest='passwd_prompt',
-                       help='prompt for user password')
+            action='store_true', default=False,
+            dest='passwd_prompt',
+            help='prompt for user password')
 
-        g.add_argument('-a', '--attempts',
-                       default=10,
-                       help='login attempts before giving up')
+        g.add_argument('-a','--attempts',
+            default=20,
+            help='login attempts before giving up')
 
     # -------------------------------------------------------------------------
     # run command, can be involved from SHELL or programmatically
@@ -194,7 +199,16 @@ class netconifyCmdo(object):
         except Exception as err:
             self._hook_exception('parse_args', err)
 
-        args = self._args  # alias
+        args = self._args # alias
+
+        # ---------------------------------------------------------------
+        # validate device hostname or IP address
+        # ---------------------------------------------------------------
+
+        # if self._name is None:
+        #     self.results['failed'] = True
+        #     self.results['errmsg'] = 'ERROR: Device hostname/IP not specified !!!'
+        #     return self.results
 
         # ----------------------------------
         # handle password input if necessary
@@ -211,8 +225,7 @@ class netconifyCmdo(object):
         if fname is not None:
             if os.path.isfile(fname) is False:
                 self.results['failed'] = True
-                self.results[
-                    'errmsg'] = 'ERROR: unknown file: {0}'.format(fname)
+                self.results['errmsg'] = 'ERROR: unknown file: {0}'.format(fname)
                 return self.results
 
         # --------------------
@@ -239,6 +252,7 @@ class netconifyCmdo(object):
             traceback.print_exc()
             self._hook_exception('action', err)
 
+
         # ----------------------------------------------------
         # logout, unless we don't need to (due to reboot,etc.)
         # -----------------------------------------------------
@@ -261,7 +275,7 @@ class netconifyCmdo(object):
     # -------------------------------------------------------------------------
 
     def _hook_exception(self, event, err):
-        self._notify("ERROR", "{0}\n".format(str(err)))
+        self._notify("ERROR", "{0}:{1}\n".format(event, str(err)))
         raise
 
     def _tty_notifier(self, tty, event, message):
@@ -291,6 +305,14 @@ class netconifyCmdo(object):
             tty_args['port'] = port
             self.console = ('telnet', host, port)
             self._tty = netconify.Telnet(**tty_args)
+        elif self._args.ssh is not None:
+            host, port, s_user, s_passwd = re.split('[,:]', self._args.ssh)
+            tty_args['host'] = host
+            tty_args['port'] = port
+            tty_args['s_user'] = s_user or self._args.user
+            tty_args['s_passwd'] = s_passwd or self._args.passwd
+            self.console = ('ssh', host, port, s_user, s_passwd)
+            self._tty = netconify.SecureShell(**tty_args)
         else:
             tty_args['port'] = self._args.port
             tty_args['baud'] = self._args.baud
@@ -298,7 +320,9 @@ class netconifyCmdo(object):
             self._tty = netconify.Serial(**tty_args)
 
         notify = self.on_notify or self._tty_notifier
-        self._tty.login(notify=notify)
+        self._tty.login( notify=notify )
+
+
 
     def _tty_logout(self):
         self._tty.logout()
@@ -307,7 +331,7 @@ class netconifyCmdo(object):
     # ACTIONS
     # -------------------------------------------------------------------------
     def _do_actions(self):
-        args = self._args  # alias
+        args = self._args # alias
 
         if args.request_srx_cluster is not None:
             self._srx_cluster()
@@ -388,11 +412,10 @@ class netconifyCmdo(object):
         if not hasattr(self._tty.nc.facts, 'inventory'):
             return
 
-        fname = self._save_name + '-inventory.xml'
+        fname = self._save_name+'-inventory.xml'
         path = os.path.join(self._args.savedir, fname)
         self._notify('inventory', 'saving: {0}'.format(path))
-        as_xml = etree.tostring(
-            self._tty.nc.facts.inventory, pretty_print=True)
+        as_xml = etree.tostring(self._tty.nc.facts.inventory, pretty_print=True)
         with open(path, 'w+') as f:
             f.write(as_xml)
 
@@ -401,8 +424,7 @@ class netconifyCmdo(object):
         self._tty.nc.facts.gather()
         self.facts = self._tty.nc.facts.items
         self.results['facts'] = self.facts
-        self._save_name = self._name or self.facts[
-            'hostname'] or '_'.join(self.console)
+        self._save_name = self._name or self.facts['hostname'] or '_'.join(self.console)
 
     def _push_config(self):
         """ push the configuration or rollback changes on error """
@@ -425,8 +447,7 @@ class netconifyCmdo(object):
         rc = self._tty.nc.commit()
         if rc is not True:
             self.results['failed'] = True
-            self.results[
-                'errmsg'] = 'faiure to commit configuration, aborting.'
+            self.results['errmsg'] = 'faiure to commit configuration, aborting.'
             self._notify('conf_save_err', self.results['errmsg'])
             self._tty.nc.rollback()
             return
@@ -449,7 +470,7 @@ class netconifyCmdo(object):
 
         if self.facts is None:
             self._gather_facts()
-        facts = self.facts  # alias
+        facts = self.facts # alias
 
         # --------------------------------------------------------
         # make sure we're logged into a QFX node device.
@@ -458,8 +479,7 @@ class netconifyCmdo(object):
         # --------------------------------------------------------
 
         if not any([facts['model'].startswith(m) for m in QFX_MODEL_LIST]):
-            self.results['errmsg'] = "Not on a QFX device [{0}]".format(
-                facts['model'])
+            self.results['errmsg'] = "Not on a QFX device [{0}]".format(facts['model'])
             self.results['failed'] = True
             self._save_facts_json()
             self._save_inventory_xml()
@@ -468,8 +488,7 @@ class netconifyCmdo(object):
             return
 
         now, later = self._qfx_device_mode_get()
-        # compare to after-reoobt
-        change = bool(later != self._args.qfx_mode)
+        change = bool(later != self._args.qfx_mode)     # compare to after-reboot
         reboot = bool(now != self._args.qfx_mode)       # compare to now
 
         if now == QFX_MODE_SWITCH and change is True:   # flipping to NODE
@@ -494,13 +513,12 @@ class netconifyCmdo(object):
             self._notify('info', 'Action required')
 
         if change is True:
-            self._notify('change',
-                         'Changing the mode to: {0}'.format(self._args.qfx_mode))
+            self._notify('change', 'Changing the mode to: {0}'.format(self._args.qfx_mode))
             self.results['changed'] = True
             self._qfx_device_mode_set()
 
         if reboot is True:
-            self._notify('change', 'REBOOTING device now!')
+            self._notify('change','REBOOTING device now!')
             self.results['changed'] = True
             self._tty.nc.reboot()
             # no need to close the tty, since the device is rebooting ...
